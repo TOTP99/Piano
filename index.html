@@ -1008,7 +1008,7 @@ body {
 
   /**
    * 自动读取与页面同目录的 auto-piano-library.json 并合并进曲库。
-   * - 已有相同 id：保留本地 localStorage，不覆盖
+   * - 已有相同 id：用文件中的曲目覆盖本地
    * - 新 id：追加
    * - file:// 或文件不存在时静默失败
    */
@@ -1022,33 +1022,37 @@ body {
     return [];
   }
 
-  /** @returns {Promise<number>} 新加入的曲目数量 */
+  /** @returns {Promise<{added:number, updated:number}>} */
   async function loadLibraryFromSidecar() {
     let url;
     try {
       url = new URL(SIDE_CAR_LIBRARY_FILE, window.location.href).href;
     } catch (e) {
-      return 0;
+      return { added: 0, updated: 0 };
     }
     try {
       const res = await fetch(url, { cache: "no-cache" });
-      if (!res.ok) return 0;
+      if (!res.ok) return { added: 0, updated: 0 };
       const obj = await res.json();
       const songs = extractSongsFromLibraryJson(obj);
-      if (!songs.length) return 0;
-      let added = 0;
+      if (!songs.length) return { added: 0, updated: 0 };
+      let added = 0, updated = 0;
       songs.forEach(function (s) {
         const entry = songEntryFromRaw(s);
         if (!entry) return;
         const exist = SONG_LIBRARY.findIndex(function (x) { return x.id === entry.id; });
-        if (exist >= 0) return;
-        SONG_LIBRARY.push(entry);
-        added++;
+        if (exist >= 0) {
+          SONG_LIBRARY[exist] = entry; // 同 id 覆盖
+          updated++;
+        } else {
+          SONG_LIBRARY.push(entry);
+          added++;
+        }
       });
-      return added;
+      return { added: added, updated: updated };
     } catch (e) {
       console.info("[曲库] 未自动加载 " + SIDE_CAR_LIBRARY_FILE + "（可忽略）", e && e.message ? e.message : e);
-      return 0;
+      return { added: 0, updated: 0 };
     }
   }
 
@@ -1278,9 +1282,11 @@ body {
     if (statusEl) statusEl.textContent = SONG_LIBRARY.length ? ("准备就绪 — 当前：《" + currentSong.name + "》") : "准备就绪 — 曲库为空，请添加曲目";
   })();
 
-  // 启动时自动合并同目录 auto-piano-library.json（不覆盖本地已有同 id 曲目）
-  loadLibraryFromSidecar().then(function (added) {
-    if (!added) {
+  // 启动时自动合并同目录 auto-piano-library.json（同 id 覆盖本地曲目）
+  loadLibraryFromSidecar().then(function (result) {
+    const added = result && result.added ? result.added : 0;
+    const updated = result && result.updated ? result.updated : 0;
+    if (!added && !updated) {
       if (!SONG_LIBRARY.length) {
         const statusEl = document.getElementById("status");
         if (statusEl) {
@@ -1290,7 +1296,11 @@ body {
       return;
     }
     saveLibraryToStorage();
-    if (!currentSong || currentSong.id === "empty" || !SONG_LIBRARY.some(function (s) { return s.id === currentSong.id; })) {
+    // 当前曲若被覆盖，重新 loadSong 以刷新旋律/MIDI
+    const still = currentSong && SONG_LIBRARY.find(function (s) { return s.id === currentSong.id; });
+    if (still) {
+      try { loadSong(still); } catch (e) { currentSong = still; }
+    } else if (!currentSong || currentSong.id === "empty" || !still) {
       try { loadSong(SONG_LIBRARY[0]); } catch (e) {
         currentSong = SONG_LIBRARY[0];
       }
@@ -1298,7 +1308,10 @@ body {
     try { renderSongList(); renderMiniSongList(); updateNowPlaying(); } catch (e) {}
     const statusEl = document.getElementById("status");
     if (statusEl) {
-      statusEl.textContent = "已从 auto-piano-library.json 自动加入 " + added + " 首 · 当前：《" + currentSong.name + "》";
+      var parts = [];
+      if (added) parts.push("新加 " + added + " 首");
+      if (updated) parts.push("覆盖 " + updated + " 首");
+      statusEl.textContent = "已从 auto-piano-library.json " + parts.join("、") + " · 当前：《" + currentSong.name + "》";
     }
   });
 

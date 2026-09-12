@@ -9,7 +9,7 @@
 <body>
 
 <audio id="audioUnlock" preload="auto" style="display:none" src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="></audio>
-<canvas id="mapleLeafCanvas" aria-hidden="true"></canvas></canvas>
+<canvas id="mapleLeafCanvas" aria-hidden="true"></canvas>
 
 <div class="app-shell">
   <div class="header">
@@ -574,9 +574,8 @@
 
   let audioUnlocked = false;
   function unlockAudioSession() {
-    // iOS静音开关会屏蔽AudioContext合成音效，但<audio>标签走不同的音频会话通道不受影响；
-    // 首次用户手势时（ensureAudio必然在真实点击/触摸事件里被调用）播放一次无声<audio>，
-    // 把音频会话切到"播放"类别，之后Web Audio合成的钢琴声也能绕开静音开关
+    // iOS物理静音开关会屏蔽AudioContext合成音效，但<audio>标签走不同的音频会话通道不受影响；
+    // 首次用户手势时播放一次无声<audio>可以把会话切到"播放"类别，之后Web Audio的琴声也能绕开静音开关
     if (audioUnlocked) return;
     audioUnlocked = true;
     const el = document.getElementById("audioUnlock");

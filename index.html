@@ -38,7 +38,7 @@
       <div class="season-track" id="seasonTrack">
         <div class="season-thumb" id="seasonThumb"></div>
       </div>
-      <div class="season-ticks" aria-hidden="true"><span data-i="0">春</span><span data-i="1">夏</span><span data-i="2">秋</span><span data-i="3">冬</span><span data-i="4">关</span></div>
+      <div class="season-ticks" aria-hidden="true"><span data-i="0">🌸春</span><span data-i="1">🦋夏</span><span data-i="2">🍁秋</span><span data-i="3">❄️冬</span><span data-i="4">关</span></div>
     </div>
   </div>
     <div class="keyboard-wrap" id="keyboardWrap">
@@ -490,6 +490,8 @@
   let pedalDown = false;
   let sustainedGains = [];
   let resonanceGains = [];
+  let pendingNoteGains = []; // 已调度但尚未起音的音符（停止/切歌时静音）
+  let sharedNoiseBuf = null; // 琴锤噪声共享 buffer，每音符复用
   let activeVoiceLoad = 0;
   const MAX_RESONANCE_VOICES = 24;
   let audioSessionNoteCount = 0;
@@ -599,6 +601,15 @@
     if (audioCtx) return;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
+    // 琴锤噪声只生成一次，每音符复用：避免快曲中高频 createBuffer + 主线程逐采样填充
+    (function () {
+      const nLen = Math.floor(audioCtx.sampleRate * 0.016);
+      const buf = audioCtx.createBuffer(1, nLen, audioCtx.sampleRate);
+      const nd = buf.getChannelData(0);
+      for (let i = 0; i < nLen; i++) nd[i] = (Math.random() * 2 - 1) * Math.exp(-i / (nLen * 0.11));
+      sharedNoiseBuf = buf;
+    })();
+
     compNode = audioCtx.createDynamicsCompressor();
     compNode.threshold.value = -22;
     compNode.knee.value = 18;
@@ -657,6 +668,8 @@
     bodyResonators = [];
     sustainedGains = [];
     resonanceGains = [];
+    pendingNoteGains = [];
+    sharedNoiseBuf = null;
     activeVoiceLoad = 0;
     ensureAudio();
   }
@@ -755,6 +768,14 @@
     }
 
     const noteGain = audioCtx.createGain();
+    // 待发音符跟踪：MIDI 窗口调度的音频已按音频时钟排入未来，停止/切歌时可立即静音
+    if (t0 > audioCtx.currentTime + 0.03) {
+      pendingNoteGains.push({ gain: noteGain, t0: t0 });
+      if (pendingNoteGains.length > 500) {
+        const nowPrune = audioCtx.currentTime;
+        pendingNoteGains = pendingNoteGains.filter(function (v) { return v.t0 > nowPrune - 5; });
+      }
+    }
     const filter = audioCtx.createBiquadFilter();
     filter.type = "lowpass";
     const bright = 2800 + f * 0.55 + vel * 3200;
@@ -765,14 +786,9 @@
 
     // 琴锤瞬态：更短更亮噪声 + 短促敲击正弦
     try {
-      const nLen = Math.floor(audioCtx.sampleRate * 0.016);
-      const nBuf = audioCtx.createBuffer(1, nLen, audioCtx.sampleRate);
-      const nd = nBuf.getChannelData(0);
-      for (let i = 0; i < nLen; i++) {
-        nd[i] = (Math.random() * 2 - 1) * Math.exp(-i / (nLen * 0.11));
-      }
       const nSrc = audioCtx.createBufferSource();
-      nSrc.buffer = nBuf;
+      nSrc.buffer = sharedNoiseBuf;
+      if (!nSrc.buffer) throw new Error("no noise buffer");
       const nBp = audioCtx.createBiquadFilter();
       nBp.type = "bandpass";
       nBp.frequency.value = Math.min(7800, 1600 + f * 4.2 + vel * 1200);
@@ -814,6 +830,7 @@
     ];
 
     partials.forEach(function (p) {
+      if (isOverloaded && p.n >= 7) return; // 过载时舍去极弱高次泛音，单音符节点省约三成
       const osc = audioCtx.createOscillator();
       const g = audioCtx.createGain();
       osc.type = p.type;
@@ -836,7 +853,7 @@
     });
 
     // 基音下八度轻共鸣
-    if (midiApprox > 36) {
+    if (midiApprox > 36 && !isOverloaded) { // 过载时跳过下八度共鸣，优先保主音符
       const sub = audioCtx.createOscillator();
       const sg = audioCtx.createGain();
       sub.type = "sine";
@@ -1094,6 +1111,23 @@
     midiPlaying = false;
   }
 
+  /** 静音所有已调度但尚未起音的音符（停止/切歌/改速重排时调用）
+   *  leadSec：在 now 之后多少秒内起音的视为"已开始"，予以保留（停止时让已响的自然收尾） */
+  function mutePendingNotes(leadSec) {
+    leadSec = leadSec == null ? 0.02 : leadSec;
+    if (!audioCtx || !pendingNoteGains.length) { pendingNoteGains = []; return; }
+    const now = audioCtx.currentTime;
+    pendingNoteGains.forEach(function (v) {
+      if (v.t0 > now + leadSec) {
+        try {
+          v.gain.gain.cancelScheduledValues(now);
+          v.gain.gain.setValueAtTime(0.0001, now);
+        } catch (e) {}
+      }
+    });
+    pendingNoteGains = [];
+  }
+
   function midiBeatSec() {
     return 60 / Math.max(30, Math.min(240, tempo));
   }
@@ -1147,7 +1181,14 @@
       const vel = mainVol * ev.vel * expr;
       const startWhen = Math.max(when, nowAudio);
 
-      // 预备高亮下一音
+      // 音频按音频时钟立即精确调度（不再经 setTimeout 中转：
+      // iOS 定时器在高负载下抖动可达数十毫秒，是快曲卡顿的主因）；setTimeout 只做 UI
+      try {
+        playNote(transposeNote(ev.note), Math.max(0.08, when + dur - startWhen), vel, startWhen, { scroll: true });
+      } catch (e) {
+        // 单个音符调度失败不应影响后续音符播放
+      }
+      // 预备高亮下一音（纯 UI）
       const previewDelay = Math.max(0, (startWhen - nowAudio) * 1000);
       const tidPrev = setTimeout(function () {
         if (!isPlaying || !midiPlaying) return;
@@ -1156,10 +1197,7 @@
           const next = midiEvents[idx + 1];
           if (next) showPreview(transposeNote(next.note));
           else clearPreview();
-          playNote(transposeNote(ev.note), Math.max(0.08, when + dur - startWhen), vel, startWhen, { scroll: true });
-        } catch (e) {
-          // 单个音符调度失败不应影响后续音符播放
-        }
+        } catch (e) {}
       }, previewDelay);
       midiTimerIds.push(tidPrev);
     }
@@ -1205,6 +1243,8 @@
     midiTimerIds = [];
     if (midiEndTimer) { clearTimeout(midiEndTimer); midiEndTimer = null; }
     if (midiRaf) { clearTimeout(midiRaf); midiRaf = null; }
+    // 音频已按音频时钟直接排入未来：先全部静音，再重排，否则同一音符会发声两次
+    mutePendingNotes(0);
     // 若 nextIndex 超前过多，回退到第一个 beat >= nowBeat - 小容差 的事件
     let i = 0;
     while (i < midiEvents.length && midiEvents[i].beat < nowBeat - 0.01) i++;
@@ -1215,6 +1255,7 @@
   function startMidiPlayback() {
     if (!midiEvents || !midiEvents.length || !audioCtx) return;
     clearMidiTimers();
+    mutePendingNotes(0);
     midiPlaying = true;
     midiBeatOffset = 0;
     midiNextIndex = 0;
@@ -1369,6 +1410,7 @@
     SeasonParticles.notifyPlayStop();
     if (timerId) { clearTimeout(timerId); timerId = null; }
     clearMidiTimers();
+    mutePendingNotes();
     clearAllHighlights();
     clearPreview();
     setPedal(false);
@@ -2659,35 +2701,11 @@ const SONG_NAME_ZH_MAP = {
       bigSpeedRange: [34, 46],
       rotSpeedRange: [-0.8, 0.8],
       draw: function (ctx, p) {
-        const s = p.size / 32;
-        ctx.scale(s, s);
-        ctx.beginPath();
-        ctx.moveTo(0, -16);
-        ctx.bezierCurveTo(4, -12, 6, -10, 10, -10);
-        ctx.bezierCurveTo(8, -6, 8, -4, 12, -2);
-        ctx.bezierCurveTo(8, 0, 8, 2, 11, 6);
-        ctx.bezierCurveTo(6, 5, 4, 6, 3, 9);
-        ctx.bezierCurveTo(2, 5, 1, 3, 0, 8);
-        ctx.bezierCurveTo(-1, 3, -2, 5, -3, 9);
-        ctx.bezierCurveTo(-4, 6, -6, 5, -11, 6);
-        ctx.bezierCurveTo(-8, 2, -8, 0, -12, -2);
-        ctx.bezierCurveTo(-8, -4, -8, -6, -10, -10);
-        ctx.bezierCurveTo(-6, -10, -4, -12, 0, -16);
-        ctx.closePath();
-        const grad = ctx.createLinearGradient(0, -16, 0, 10);
-        grad.addColorStop(0, p.color.fill);
-        grad.addColorStop(1, p.color.edge);
-        ctx.fillStyle = grad;
-        ctx.fill();
-        ctx.strokeStyle = "rgba(255,240,220,0.28)";
-        ctx.lineWidth = 0.8;
-        ctx.beginPath();
-        ctx.moveTo(0, -14); ctx.lineTo(0, 8);
-        ctx.moveTo(0, -6); ctx.lineTo(8, -2);
-        ctx.moveTo(0, -6); ctx.lineTo(-8, -2);
-        ctx.moveTo(0, 0); ctx.lineTo(9, 5);
-        ctx.moveTo(0, 0); ctx.lineTo(-9, 5);
-        ctx.stroke();
+        // emoji 粒子：跨平台由系统字体渲染，大小跟随 p.size
+        ctx.font = Math.round(p.size) + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("🍁", 0, 0);
       }
     },
     winter: {
@@ -2703,30 +2721,11 @@ const SONG_NAME_ZH_MAP = {
       bigSpeedRange: [24, 34],
       rotSpeedRange: [-0.5, 0.5],
       draw: function (ctx, p) {
-        // 矢量雪花：六辐 + 尖端倒钩，跨平台渲染一致
-        const r = p.size / 2;
-        ctx.strokeStyle = p.color.fill;
-        ctx.lineWidth = Math.max(1, r * 0.16);
-        ctx.lineCap = "round";
-        ctx.shadowColor = "rgba(180, 220, 255, 0.5)";
-        ctx.shadowBlur = r * 0.6;
-        for (let k = 0; k < 6; k++) {
-          const a = k * Math.PI / 3;
-          const dx = Math.cos(a), dy = Math.sin(a);
-          ctx.beginPath();
-          ctx.moveTo(0, 0);
-          ctx.lineTo(dx * r, dy * r);
-          ctx.stroke();
-          const px = dx * r * 0.66, py = dy * r * 0.66;
-          const bl = r * 0.26;
-          [0.6, -0.6].forEach(function (off) {
-            const a2 = a + Math.PI + off;
-            ctx.beginPath();
-            ctx.moveTo(px, py);
-            ctx.lineTo(px + Math.cos(a2) * bl, py + Math.sin(a2) * bl);
-            ctx.stroke();
-          });
-        }
+        // emoji 粒子：跨平台由系统字体渲染，大小跟随 p.size
+        ctx.font = Math.round(p.size) + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("❄️", 0, 0);
       }
     },
     spring: {
@@ -2742,26 +2741,11 @@ const SONG_NAME_ZH_MAP = {
       bigSpeedRange: [26, 36],
       rotSpeedRange: [-0.6, 0.6],
       draw: function (ctx, p) {
-        // 矢量樱花：五瓣渐变 + 花蕊
-        const r = p.size / 2;
-        ctx.shadowColor = "rgba(247, 168, 200, 0.45)";
-        ctx.shadowBlur = r * 0.5;
-        for (let k = 0; k < 5; k++) {
-          ctx.save();
-          ctx.rotate(k * Math.PI * 2 / 5);
-          const grad = ctx.createLinearGradient(0, 0, 0, -r);
-          grad.addColorStop(0, p.color.edge);
-          grad.addColorStop(1, p.color.fill);
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.ellipse(0, -r * 0.55, r * 0.34, r * 0.58, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-        }
-        ctx.fillStyle = "#fff6c9";
-        ctx.beginPath();
-        ctx.arc(0, 0, Math.max(1, r * 0.2), 0, Math.PI * 2);
-        ctx.fill();
+        // emoji 粒子：跨平台由系统字体渲染，大小跟随 p.size
+        ctx.font = Math.round(p.size) + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("🌸", 0, 0);
       }
     },
     summer: {
@@ -2780,34 +2764,11 @@ const SONG_NAME_ZH_MAP = {
       swayAmpRange: [30, 60],      // 左右摆动更大，模拟振翅乱飞的轨迹
       swaySpeedRange: [0.6, 1.3],
       draw: function (ctx, p) {
-        // 矢量蝴蝶：上下翅 + 身体 + 触角
-        const r = p.size / 2;
-        ctx.shadowColor = "rgba(255, 200, 120, 0.35)";
-        ctx.shadowBlur = r * 0.4;
-        [-1, 1].forEach(function (sx) {
-          ctx.fillStyle = p.color.fill;
-          ctx.beginPath();
-          ctx.ellipse(sx * r * 0.44, -r * 0.28, r * 0.42, r * 0.5, sx * 0.5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = p.color.edge;
-          ctx.beginPath();
-          ctx.ellipse(sx * r * 0.34, r * 0.38, r * 0.3, r * 0.34, sx * -0.4, 0, Math.PI * 2);
-          ctx.fill();
-        });
-        ctx.strokeStyle = "#3a2a1c";
-        ctx.lineCap = "round";
-        ctx.lineWidth = Math.max(1, r * 0.12);
-        ctx.beginPath();
-        ctx.moveTo(0, -r * 0.55);
-        ctx.lineTo(0, r * 0.55);
-        ctx.stroke();
-        ctx.lineWidth = Math.max(1, r * 0.07);
-        [-1, 1].forEach(function (sx) {
-          ctx.beginPath();
-          ctx.moveTo(0, -r * 0.5);
-          ctx.quadraticCurveTo(sx * r * 0.2, -r * 0.8, sx * r * 0.34, -r * 0.95);
-          ctx.stroke();
-        });
+        // emoji 粒子：跨平台由系统字体渲染，大小跟随 p.size
+        ctx.font = Math.round(p.size) + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("🦋", 0, 0);
       }
     }
   };
@@ -2876,7 +2837,7 @@ const SONG_NAME_ZH_MAP = {
         swaySpeed: rand(swaySpeedRange[0], swaySpeedRange[1]),
         speedY,
         opacity: rand(0.5, 0.9) * (0.65 + depth * 0.35),
-        blur: (1 - depth) * 1.5,
+        blur: (1 - depth) * 0.8, // 上限减半：ctx.filter blur 在移动端很贵，是掉帧主因之一
         color
       };
     }

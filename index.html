@@ -18,11 +18,11 @@
       <span class="credit-tp">TP 制作</span>
     </div>
     <div class="top-actions">
-      <button class="btn play" id="playBtn">▶ 开始</button>
-      <button class="btn pause off" id="pauseBtn" aria-label="暂停">⏸ 暂停</button>
-      <button class="btn stop" id="stopBtn">■ 结束</button>
-      <button class="btn song" id="songBtn">选曲</button>
-      <button type="button" class="btn ctrl-toggle" id="ctrlToggleBtn" title="控制面板" aria-label="控制面板" aria-expanded="false">控制</button>
+      <button class="btn play" id="playBtn" title="开始演奏（空格键）">开始</button>
+      <button class="btn pause off" id="pauseBtn" aria-label="暂停" title="暂停 / 继续（空格键）">暂停</button>
+      <button class="btn stop" id="stopBtn" title="结束演奏">结束</button>
+      <button class="btn song" id="songBtn" title="打开曲库选曲">选曲</button>
+      <button type="button" class="btn ctrl-toggle" id="ctrlToggleBtn" title="控制面板：速度、音色、表现" aria-label="控制面板" aria-expanded="false">控制</button>
     </div>
   </div>
 
@@ -34,12 +34,12 @@
         <img src="cat-piano.webp" alt="" draggable="false">
       </div>
     </div>
-    <div class="season-slider" id="seasonSlider" role="slider" tabindex="0" title="拖动滑过四季"
+    <div class="season-dial" id="seasonSlider" role="slider" tabindex="0" title="点选或绕圈拖动，循环切换季节"
          aria-label="季节特效" aria-valuemin="0" aria-valuemax="4" aria-valuenow="4" aria-valuetext="关">
-      <div class="season-track" id="seasonTrack">
-        <div class="season-thumb" id="seasonThumb"></div>
-      </div>
-      <div class="season-ticks" aria-hidden="true"><span data-i="0">🌸春</span><span data-i="1">🦋夏</span><span data-i="2">🍁秋</span><span data-i="3">❄️冬</span><span data-i="4">关</span></div>
+      <div class="dial-ring" aria-hidden="true"></div>
+      <div class="dial-pointer-wrap" aria-hidden="true"><div class="dial-pointer" id="seasonPointer"></div></div>
+      <div class="dial-center" aria-hidden="true"><span id="seasonEmoji">🌙</span><span id="seasonName">关</span></div>
+      <div class="dial-ticks" aria-hidden="true"><span data-i="0">🌸春</span><span data-i="1">🦋夏</span><span data-i="2">🍁秋</span><span data-i="3">❄️冬</span><span data-i="4">关</span></div>
     </div>
   </div>
     <div class="keyboard-wrap" id="keyboardWrap">
@@ -736,30 +736,6 @@
    * - 立体声按弦位平移
    */
 
-  /**
-   * 小猫跟弹：音符起音时刻触发一次身体轻点，左右交替模拟双爪，
-   * 力度大时下探更深。由 playNote 的高亮定时器在起音瞬间调用，
-   * 与声音同源同节拍；110ms 限流保证快曲不抖。
-   */
-  const catImg = document.querySelector(".cat-piano-decor img");
-  let catStrikeSide = 0, catStrikeTimer = 0, catStrikeGen = 0, lastCatStrike = 0;
-  function catStrike(vel) {
-    if (!catImg || isPaused) return;
-    const now = performance.now();
-    if (now - lastCatStrike < 110) return;
-    lastCatStrike = now;
-    catStrikeSide = 1 - catStrikeSide;
-    const gen = ++catStrikeGen;
-    catImg.classList.remove("strike-l", "strike-r", "strike-strong");
-    catImg.classList.add(catStrikeSide ? "strike-l" : "strike-r");
-    if (vel >= 0.45) catImg.classList.add("strike-strong");
-    clearTimeout(catStrikeTimer);
-    catStrikeTimer = setTimeout(function () {
-      if (gen !== catStrikeGen || !catImg) return;
-      catImg.classList.remove("strike-l", "strike-r", "strike-strong");
-    }, 140);
-  }
-
   function playNote(note, duration, volume, when, opts) {
     duration = duration == null ? 0.4 : duration;
     volume = volume == null ? 0.4 : volume;
@@ -950,7 +926,6 @@
       if (activeTimeouts.get(note)) clearTimeout(activeTimeouts.get(note));
       const tid = setTimeout(function () {
         setKeyState(note, "active");
-        catStrike(vel); // 小猫跟弹：与琴键高亮同一起音时刻触发
         if (opts.scroll) scrollKeyIntoView(note);
         const visDur = Math.min(duration, 0.55) * 1000;
         const tid2 = setTimeout(function () {
@@ -1470,7 +1445,7 @@
     }
     updateExprBar(0.4);
     document.getElementById("playBtn").classList.remove("active");
-    document.getElementById("playBtn").textContent = "▶ 开始";
+    document.getElementById("playBtn").textContent = "开始";
     document.getElementById("status").textContent = "已停止 — 当前：《" + currentSong.name + "》";
     refreshPauseUI();
   }
@@ -1481,7 +1456,7 @@
     if (!pb) return;
     pb.classList.toggle("off", !isPlaying && !isPaused);
     pb.classList.toggle("paused", isPaused);
-    pb.innerHTML = isPaused ? "▶ 继续" : "⏸ 暂停";
+    pb.innerHTML = isPaused ? "继续" : "暂停";
     pb.setAttribute("aria-label", isPaused ? "继续播放" : "暂停播放");
   }
 
@@ -1880,7 +1855,7 @@
   }
   function resetStopBtn() {
     const btn = document.getElementById("stopBtn");
-    if (btn) btn.textContent = "■ 结束";
+    if (btn) btn.textContent = "结束";
   }
 
 
@@ -3035,16 +3010,27 @@ const SONG_NAME_ZH_MAP = {
     };
   })();
 
-  // ========== 四季流转滑杆（UI，不改核心演奏逻辑）==========
+  // ========== 四季转盘（UI，不改核心演奏逻辑）==========
   // 顺序：春 → 夏 → 秋 → 冬 → 关 →（循环）春，默认关闭，只弹钢琴
+  // 圆形转盘：点刻度直达，绕圈拖动自然循环
   const SEASON_CYCLE = [
     { key: "spring" }, { key: "summer" }, { key: "autumn" }, { key: "winter" }, { key: null }
   ];
   const SEASON_NAMES = ["春", "夏", "秋", "冬", "关"];
+  const SEASON_EMOJI = ["🌸", "🦋", "🍁", "❄️", "🌙"];
   let seasonIndex = 0;
-  function paintSeasonThumb(v) {
+  function paintSeasonDial(idx) {
     var slider = document.getElementById("seasonSlider");
-    if (slider) slider.style.setProperty("--pos", v);
+    if (!slider) return;
+    slider.style.setProperty("--ang", (idx * 72) + "deg"); // 指针从12点顺时针转到该季节刻度
+    var emo = document.getElementById("seasonEmoji");
+    var nm = document.getElementById("seasonName");
+    if (emo) emo.textContent = SEASON_EMOJI[idx];
+    if (nm) nm.textContent = SEASON_NAMES[idx];
+    var ticks = slider.querySelectorAll(".dial-ticks span");
+    for (var i = 0; i < ticks.length; i++) {
+      ticks[i].classList.toggle("on", +ticks[i].getAttribute("data-i") === idx);
+    }
   }
   function applySeasonState(idx) {
     seasonIndex = idx;
@@ -3053,11 +3039,8 @@ const SONG_NAME_ZH_MAP = {
     if (slider) {
       slider.setAttribute("aria-valuenow", seasonIndex);
       slider.setAttribute("aria-valuetext", SEASON_NAMES[seasonIndex]);
-      var ticks = slider.querySelectorAll(".season-ticks span");
-      for (var i = 0; i < ticks.length; i++) {
-        ticks[i].classList.toggle("on", +ticks[i].getAttribute("data-i") === seasonIndex);
-      }
     }
+    paintSeasonDial(idx);
     // 目前只有秋叶主题带四角装饰图；其余主题不启用该装饰，避免为每个主题都画一套角标图。
     document.documentElement.classList.toggle("leaves-on", cur.key === "autumn");
     SeasonParticles.setTheme(cur.key);
@@ -3065,44 +3048,37 @@ const SONG_NAME_ZH_MAP = {
   function setSeasonByIndex(idx) {
     idx = ((idx % SEASON_CYCLE.length) + SEASON_CYCLE.length) % SEASON_CYCLE.length;
     applySeasonState(idx);
-    paintSeasonThumb(idx);
   }
-  (function setupSeasonSlider() {
+  (function setupSeasonDial() {
     var slider = document.getElementById("seasonSlider");
-    var track = document.getElementById("seasonTrack");
-    if (!slider || !track) { setSeasonByIndex(SEASON_CYCLE.length - 1); return; }
-    function stepPx() { return track.clientWidth / 4 || 40; }
-    function xToV(clientX) {
-      var r = track.getBoundingClientRect();
-      return (clientX - r.left) / Math.max(1, r.width) * 4;
+    if (!slider) { setSeasonByIndex(SEASON_CYCLE.length - 1); return; }
+    // 指针角度 → 最近的季节序号（0°=正东，屏幕坐标顺时针为正）
+    function angleToIndex(clientX, clientY) {
+      var r = slider.getBoundingClientRect();
+      var dx = clientX - (r.left + r.width / 2);
+      var dy = clientY - (r.top + r.height / 2);
+      if (dx * dx + dy * dy < 4) return seasonIndex; // 点圆心附近：保持不动
+      var deg = Math.atan2(dy, dx) * 180 / Math.PI;
+      var rel = (((deg + 90) % 360) + 360) % 360;
+      return Math.round(rel / 72) % 5;
     }
-    function wrapV(v) { while (v > 4.5) v -= 5; while (v < -0.5) v += 5; return v; }
-    function normIdx(v) { return ((Math.round(v) % 5) + 5) % 5; }
-    var dragV = null, lastX = null;
+    var dragging = false;
+    function pointTo(e) {
+      var idx = angleToIndex(e.clientX, e.clientY);
+      if (idx !== seasonIndex) setSeasonByIndex(idx);
+    }
     slider.addEventListener("pointerdown", function (e) {
       try { slider.setPointerCapture(e.pointerId); } catch (err) {}
+      dragging = true;
       slider.classList.add("dragging");
-      lastX = e.clientX;
-      dragV = wrapV(xToV(e.clientX));
-      paintSeasonThumb(dragV);
-      var idx = normIdx(dragV);
-      if (idx !== seasonIndex) applySeasonState(idx);
+      pointTo(e); // 点按即按角度跳到最近季节
     });
     slider.addEventListener("pointermove", function (e) {
-      if (dragV === null || lastX === null) return;
-      var dx = e.clientX - lastX;
-      lastX = e.clientX;
-      dragV = wrapV(dragV + dx / stepPx());
-      paintSeasonThumb(dragV);
-      var idx = normIdx(dragV);
-      if (idx !== seasonIndex) applySeasonState(idx);
+      if (dragging) pointTo(e);
     });
     function endDrag() {
-      if (dragV === null) return;
+      dragging = false;
       slider.classList.remove("dragging");
-      var idx = normIdx(dragV);
-      dragV = null; lastX = null;
-      setSeasonByIndex(idx); // 松手吸附到最近的季节
     }
     slider.addEventListener("pointerup", endDrag);
     slider.addEventListener("pointercancel", endDrag);
@@ -3117,6 +3093,32 @@ const SONG_NAME_ZH_MAP = {
       setSeasonByIndex(seasonIndex + d);
     });
     setSeasonByIndex(SEASON_CYCLE.length - 1); // 默认关闭特效（只弹钢琴）
+  })();
+
+  // ========== 顶部控制键智能排布 ==========
+  // 始终保持一行：先按 CSS 均分布局；若仍溢出（极窄屏/大字号），
+  // 逐步缩小字号直到放下，保底 9px，再放不下才省略号。
+  (function fitTopActions() {
+    var bar = document.querySelector(".top-actions");
+    if (!bar) return;
+    var btns = Array.prototype.slice.call(bar.querySelectorAll(".btn"));
+    if (!btns.length) return;
+    function fit() {
+      btns.forEach(function (b) { b.style.fontSize = ""; });
+      var fs = parseFloat(getComputedStyle(btns[0]).fontSize) || 12;
+      var guard = 0;
+      while (bar.scrollWidth > bar.clientWidth + 1 && fs > 9 && guard++ < 24) {
+        fs -= 0.5;
+        var v = fs.toFixed(1) + "px";
+        btns.forEach(function (b) { b.style.fontSize = v; });
+      }
+    }
+    var t = null;
+    function refit() { clearTimeout(t); t = setTimeout(fit, 120); }
+    window.addEventListener("resize", refit);
+    window.addEventListener("orientationchange", function () { setTimeout(fit, 250); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+    fit();
   })();
 
   // ========== 横竖屏自动检测 ==========

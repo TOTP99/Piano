@@ -99,6 +99,7 @@ body {
   }
   .top-actions .btn {
     padding: 6px 12px; font-size: 0.78rem; white-space: nowrap;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis;
   }
   .top-actions .btn.play { flex: 0 0 auto; min-width: 0; }
   .top-actions .btn.stop { flex: 0 0 auto; min-width: 0; }
@@ -386,78 +387,86 @@ body {
     pointer-events: none; user-select: none; -webkit-user-drag: none;
     filter: saturate(0.9) brightness(0.97);
     box-shadow: 0 10px 18px rgba(0,0,0,0.42), 0 2px 4px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,230,180,0.12);
-    transition: filter 0.2s ease, box-shadow 0.2s ease, transform 0.13s ease-out;
-    will-change: transform;
+    transition: filter 0.2s ease, box-shadow 0.2s ease;
   }
-  /* 小猫跟弹：左右交替轻点，力度大时下探更深（由 JS 在音符起音时刻触发） */
-  .cat-piano-decor img.strike-l { transform: translateY(4px) rotate(-1.3deg) scale(1.012); }
-  .cat-piano-decor img.strike-r { transform: translateY(4px) rotate(1.3deg) scale(1.012); }
-  .cat-piano-decor img.strike-l.strike-strong { transform: translateY(7px) rotate(-2deg) scale(1.02); }
-  .cat-piano-decor img.strike-r.strike-strong { transform: translateY(7px) rotate(2deg) scale(1.02); }
   html.leaves-on .cat-piano-decor img {
     filter: none;
     box-shadow: 0 12px 22px rgba(0,0,0,0.48), 0 0 14px 2px rgba(194,59,34,0.28), inset 0 1px 0 rgba(255,230,180,0.2);
   }
   /* 右侧空地中间：四季流转滑杆 */
-  .season-slider {
-    --pos: 4;
+  /* 四季转盘：圆形，点刻度直达 / 绕圈拖动自然循环 */
+  .season-dial {
+    --ang: 288deg; /* 默认"关"(idx4)：4×72；指针从12点位置顺时针旋转 */
+    --tick-r: 60px;
     flex: 0 0 auto;
-    width: min(210px, 44%);
+    position: relative;
+    width: 132px; height: 132px;
     margin: 0 auto;
-    padding: 12px 8px 2px;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    touch-action: pan-y;
+    touch-action: none;
     outline: none;
+    user-select: none; -webkit-user-select: none;
   }
-  .season-slider:focus-visible {
+  .season-dial:focus-visible {
     filter: drop-shadow(0 0 4px rgba(212, 168, 75, 0.6));
   }
-  .season-track {
-    position: relative;
-    height: 6px;
-    border-radius: 999px;
-    background: linear-gradient(90deg,
-      #f2a7c3 0%, #8ecdf7 25%, #d4923a 50%, #cfe4ff 75%, #2e2e35 100%);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.06);
+  .dial-ring {
+    position: absolute; inset: 6px; border-radius: 50%;
+    background: conic-gradient(from -126deg,
+      #f2a7c3 0deg 72deg, #8ecdf7 72deg 144deg, #d4923a 144deg 216deg,
+      #cfe4ff 216deg 288deg, #3a3a42 288deg 360deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
+    opacity: 0.9;
   }
-  .season-thumb {
-    position: absolute;
-    top: 50%;
-    left: calc(var(--pos) * 25%);
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    background: radial-gradient(circle at 35% 30%, #ffedbe, #e9bd62 55%, #9a742a);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55),
-      0 0 0 3px rgba(212, 168, 75, 0.18),
-      inset 0 1px 1px rgba(255, 255, 255, 0.5);
-    transition: left 0.22s ease;
+  .dial-pointer-wrap {
+    position: absolute; inset: 0;
+    transform: rotate(var(--ang));
+    transition: transform 0.25s ease;
     pointer-events: none;
   }
-  .season-slider.dragging .season-thumb { transition: none; }
-  .season-ticks {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 7px;
-    padding: 0 1px;
-    font-family: "Noto Serif SC", "Songti SC", serif;
-    font-size: 0.72rem;
-    letter-spacing: 0.1em;
-    color: rgba(239, 192, 106, 0.42);
-    user-select: none;
-    -webkit-user-select: none;
+  .season-dial.dragging .dial-pointer-wrap { transition: none; }
+  .dial-pointer {
+    position: absolute; left: 50%; top: 6px;
+    width: 14px; height: 14px; border-radius: 50%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle at 35% 30%, #ffedbe, #e9bd62 55%, #9a742a);
+    box-shadow: 0 0 0 3px rgba(212, 168, 75, 0.25), 0 2px 6px rgba(0, 0, 0, 0.55);
   }
-  .season-ticks span { transition: color 0.2s, text-shadow 0.2s; }
-  .season-ticks span.on {
+  .dial-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    pointer-events: none;
+  }
+  .dial-center #seasonEmoji { font-size: 1.5rem; line-height: 1.25; }
+  .dial-center #seasonName {
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    font-size: 0.8rem; letter-spacing: 0.2em; text-indent: 0.2em;
+    color: #f5d9a0;
+  }
+  .dial-ticks { position: absolute; inset: 0; pointer-events: none; }
+  .dial-ticks span {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    font-size: 0.62rem; letter-spacing: 0.05em; white-space: nowrap;
+    color: rgba(239, 192, 106, 0.5);
+    transition: color 0.2s, text-shadow 0.2s;
+  }
+  .dial-ticks span:nth-child(1) { left: calc(50% + 0px); top: calc(50% - var(--tick-r)); }
+  .dial-ticks span:nth-child(2) { left: calc(50% + 0.951 * var(--tick-r)); top: calc(50% - 0.309 * var(--tick-r)); }
+  .dial-ticks span:nth-child(3) { left: calc(50% + 0.588 * var(--tick-r)); top: calc(50% + 0.809 * var(--tick-r)); }
+  .dial-ticks span:nth-child(4) { left: calc(50% - 0.588 * var(--tick-r)); top: calc(50% + 0.809 * var(--tick-r)); }
+  .dial-ticks span:nth-child(5) { left: calc(50% - 0.951 * var(--tick-r)); top: calc(50% - 0.309 * var(--tick-r)); }
+  .dial-ticks span.on {
     color: #f5d9a0;
     text-shadow: 0 0 8px rgba(212, 168, 75, 0.65);
   }
   @media (max-width: 420px) {
     .cat-row { padding-left: 6%; }
     .cat-piano-decor { width: 50.6%; }
-    .season-slider { width: min(170px, 40%); }
+    .season-dial { --tick-r: 50px; width: 112px; height: 112px; }
   }
   .title-group {
     display: flex; align-items: baseline; gap: 8px;

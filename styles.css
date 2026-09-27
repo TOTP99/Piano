@@ -386,8 +386,14 @@ body {
     pointer-events: none; user-select: none; -webkit-user-drag: none;
     filter: saturate(0.9) brightness(0.97);
     box-shadow: 0 10px 18px rgba(0,0,0,0.42), 0 2px 4px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,230,180,0.12);
-    transition: filter 0.2s ease, box-shadow 0.2s ease;
+    transition: filter 0.2s ease, box-shadow 0.2s ease, transform 0.13s ease-out;
+    will-change: transform;
   }
+  /* 小猫跟弹：左右交替轻点，力度大时下探更深（由 JS 在音符起音时刻触发） */
+  .cat-piano-decor img.strike-l { transform: translateY(4px) rotate(-1.3deg) scale(1.012); }
+  .cat-piano-decor img.strike-r { transform: translateY(4px) rotate(1.3deg) scale(1.012); }
+  .cat-piano-decor img.strike-l.strike-strong { transform: translateY(7px) rotate(-2deg) scale(1.02); }
+  .cat-piano-decor img.strike-r.strike-strong { transform: translateY(7px) rotate(2deg) scale(1.02); }
   html.leaves-on .cat-piano-decor img {
     filter: none;
     box-shadow: 0 12px 22px rgba(0,0,0,0.48), 0 0 14px 2px rgba(194,59,34,0.28), inset 0 1px 0 rgba(255,230,180,0.2);
@@ -453,10 +459,15 @@ body {
     .cat-piano-decor { width: 50.6%; }
     .season-slider { width: min(170px, 40%); }
   }
+  .title-group {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-right: auto; min-width: 0;
+  }
+  .title-group h1 { margin: 0; }
   .credit-tp {
     font-size: 0.5rem; font-weight: 500; letter-spacing: 0.14em;
-    color: var(--brass-bright); opacity: 0.55; text-align: right; line-height: 1;
-    user-select: none; pointer-events: none;
+    color: var(--brass-bright); opacity: 0.55; line-height: 1;
+    user-select: none; pointer-events: none; white-space: nowrap;
   }
   .header h1 { font-family: "Noto Serif SC", "Songti SC", serif; font-weight: 600; }
   .btn:hover { background: rgba(212, 146, 58, 0.14); border-color: var(--brass); }
@@ -504,6 +515,13 @@ body {
   }
   .top-actions .btn.ctrl-toggle.active {
     background: rgba(194, 59, 34, 0.28); border-color: var(--maple-bright); color: #ffe0d8;
+  }
+  /* 窄屏：开始/暂停/结束/选曲 四键均分整行，消除右侧空白；控制键保持内容宽度 */
+  .top-actions .btn.play,
+  .top-actions .btn.pause,
+  .top-actions .btn.stop,
+  .top-actions .btn.song {
+    flex: 1 1 0;
   }
   /* 控制面板浮层 */
   #ctrlPanel {
@@ -744,15 +762,12 @@ body {
   }
 
 
-  .header-right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 2px;
-    margin-left: auto;
-  }
-  .header-right .credit-tp {
-    margin: 0;
-    text-align: right;
-    line-height: 1;
+  /* 标题组（含 TP 制作）已并入 .header 左侧，此处不再需要右列 */
+  .top-actions .btn.pause { flex: 0 0 auto; min-width: 0; }
+  .top-actions .btn.pause.off { opacity: 0.45; }
+  .top-actions .btn.pause.paused {
+    border-color: var(--amber);
+    background: rgba(212, 146, 58, 0.18);
+    color: #ffd98a;
+    opacity: 1;
   }

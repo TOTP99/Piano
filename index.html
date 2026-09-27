@@ -13,15 +13,16 @@
 
 <div class="app-shell">
   <div class="header">
-    <h1>自动弹奏钢琴</h1>
-    <div class="header-right">
-      <div class="top-actions">
-        <button class="btn play" id="playBtn">▶ 开始</button>
-        <button class="btn stop" id="stopBtn">■ 结束</button>
-        <button class="btn song" id="songBtn">选曲</button>
-        <button type="button" class="btn ctrl-toggle" id="ctrlToggleBtn" title="控制面板" aria-label="控制面板" aria-expanded="false">控制</button>
-      </div>
-      <div class="credit-tp">TP 制作</div>
+    <div class="title-group">
+      <h1>自动弹奏钢琴</h1>
+      <span class="credit-tp">TP 制作</span>
+    </div>
+    <div class="top-actions">
+      <button class="btn play" id="playBtn">▶ 开始</button>
+      <button class="btn pause off" id="pauseBtn" aria-label="暂停">⏸ 暂停</button>
+      <button class="btn stop" id="stopBtn">■ 结束</button>
+      <button class="btn song" id="songBtn">选曲</button>
+      <button type="button" class="btn ctrl-toggle" id="ctrlToggleBtn" title="控制面板" aria-label="控制面板" aria-expanded="false">控制</button>
     </div>
   </div>
 
@@ -734,6 +735,31 @@
    * - 声板 resonator 总线
    * - 立体声按弦位平移
    */
+
+  /**
+   * 小猫跟弹：音符起音时刻触发一次身体轻点，左右交替模拟双爪，
+   * 力度大时下探更深。由 playNote 的高亮定时器在起音瞬间调用，
+   * 与声音同源同节拍；110ms 限流保证快曲不抖。
+   */
+  const catImg = document.querySelector(".cat-piano-decor img");
+  let catStrikeSide = 0, catStrikeTimer = 0, catStrikeGen = 0, lastCatStrike = 0;
+  function catStrike(vel) {
+    if (!catImg || isPaused) return;
+    const now = performance.now();
+    if (now - lastCatStrike < 110) return;
+    lastCatStrike = now;
+    catStrikeSide = 1 - catStrikeSide;
+    const gen = ++catStrikeGen;
+    catImg.classList.remove("strike-l", "strike-r", "strike-strong");
+    catImg.classList.add(catStrikeSide ? "strike-l" : "strike-r");
+    if (vel >= 0.45) catImg.classList.add("strike-strong");
+    clearTimeout(catStrikeTimer);
+    catStrikeTimer = setTimeout(function () {
+      if (gen !== catStrikeGen || !catImg) return;
+      catImg.classList.remove("strike-l", "strike-r", "strike-strong");
+    }, 140);
+  }
+
   function playNote(note, duration, volume, when, opts) {
     duration = duration == null ? 0.4 : duration;
     volume = volume == null ? 0.4 : volume;
@@ -924,6 +950,7 @@
       if (activeTimeouts.get(note)) clearTimeout(activeTimeouts.get(note));
       const tid = setTimeout(function () {
         setKeyState(note, "active");
+        catStrike(vel); // 小猫跟弹：与琴键高亮同一起音时刻触发
         if (opts.scroll) scrollKeyIntoView(note);
         const visDur = Math.min(duration, 0.55) * 1000;
         const tid2 = setTimeout(function () {
@@ -1266,6 +1293,7 @@
 
   // —— 6. 自动演奏调度 ——
   let isPlaying = false, nextBeatTime = 0, beatCount = 0;
+  let isPaused = false, pauseBeat = 0; // 暂停：MIDI 路径记录暂停时的拍位置，内置路径沿用现有下标
   let melodyIndex = 0, chordIndex = 0, tempo = 92, timerId = null, previewNote = null;
   const LOOKAHEAD = 0.15, SCHEDULE_MS = 20;
   function beatDuration() { return 60 / tempo; }
@@ -1374,6 +1402,8 @@
     if (midiEvents && midiEvents.length) {
       await resumeAudio();
       isPlaying = true;
+      isPaused = false;
+      refreshPauseUI();
       SeasonParticles.notifyPlayStart();
       const btn = document.getElementById("playBtn");
       btn.classList.add("active");
@@ -1391,6 +1421,8 @@
     }
     await resumeAudio();
     isPlaying = true;
+    isPaused = false;
+    refreshPauseUI();
     SeasonParticles.notifyPlayStart();
     const btn = document.getElementById("playBtn");
     btn.classList.add("active");
@@ -1407,6 +1439,8 @@
 
   function stopAuto() {
     isPlaying = false;
+    isPaused = false;
+    pauseBeat = 0;
     SeasonParticles.notifyPlayStop();
     if (timerId) { clearTimeout(timerId); timerId = null; }
     clearMidiTimers();
@@ -1438,6 +1472,74 @@
     document.getElementById("playBtn").classList.remove("active");
     document.getElementById("playBtn").textContent = "▶ 开始";
     document.getElementById("status").textContent = "已停止 — 当前：《" + currentSong.name + "》";
+    refreshPauseUI();
+  }
+
+  /** 暂停按钮外观：未播放时变暗，暂停中高亮为"继续" */
+  function refreshPauseUI() {
+    const pb = document.getElementById("pauseBtn");
+    if (!pb) return;
+    pb.classList.toggle("off", !isPlaying && !isPaused);
+    pb.classList.toggle("paused", isPaused);
+    pb.innerHTML = isPaused ? "▶ 继续" : "⏸ 暂停";
+    pb.setAttribute("aria-label", isPaused ? "继续播放" : "暂停播放");
+  }
+
+  /**
+   * 暂停：冻结当前演奏位置，不丢一个音符。
+   * - MIDI 路径：先读出精确拍位置（midiNowBeat 在 midiPlaying=false 后只返回旧偏移，
+   *   所以必须在清定时器之前读），再停轮询、静音未起音的音符；
+   *   已起音的音符让其自然收尾，不掐断。
+   * - 内置路径：下标（melodyIndex/beatCount/chordIndex）天然保留，只停调度器。
+   * - 暂停期间 isPlaying=false，所有"if (!isPlaying) return"守卫自动冻结残留 UI 定时器。
+   */
+  function pauseAuto() {
+    if (!isPlaying || isPaused || !audioCtx) return;
+    if (midiEvents && midiEvents.length) pauseBeat = midiNowBeat();
+    isPaused = true;
+    isPlaying = false;
+    clearMidiTimers();
+    if (timerId) { clearTimeout(timerId); timerId = null; }
+    mutePendingNotes();
+    clearAllHighlights();
+    clearPreview();
+    setPedal(false);
+    refreshPauseUI();
+    document.getElementById("status").textContent = "已暂停 — 《" + currentSong.name + "》";
+  }
+
+  /**
+   * 继续：从暂停位置精确恢复，与"改速重排"同一原理——
+   * MIDI 路径按暂停拍位置重建绝对时间轴并重算事件下标；
+   * 内置路径下标未动，只需重给定拍时刻。
+   */
+  async function resumeAuto() {
+    if (!isPaused || !audioCtx) return;
+    ensureAudio();
+    if (audioCtx.state === "suspended") {
+      try { await audioCtx.resume(); } catch (err) {}
+    }
+    isPaused = false;
+    isPlaying = true;
+    if (midiEvents && midiEvents.length) {
+      midiBeatOffset = pauseBeat;
+      midiAbsStart = audioCtx.currentTime + 0.08;
+      midiNextIndex = 0;
+      while (midiNextIndex < midiEvents.length &&
+             midiEvents[midiNextIndex].beat < pauseBeat - 1e-9) midiNextIndex++;
+      clearMidiTimers();
+      mutePendingNotes(0);
+      midiPlaying = true;
+      clearPreview();
+      if (midiEvents[midiNextIndex]) showPreview(transposeNote(midiEvents[midiNextIndex].note));
+      midiScheduleWindow();
+      document.getElementById("status").textContent = "MIDI 演奏中 — 《" + currentSong.name + "》";
+    } else {
+      nextBeatTime = audioCtx.currentTime + 0.1;
+      scheduler();
+      document.getElementById("status").textContent = "演奏中 — 《" + currentSong.name + "》";
+    }
+    refreshPauseUI();
   }
 
   // —— 7. 选曲与自定义谱 ——
@@ -1772,9 +1874,9 @@
   }
 
   // ========== 8. 停止 / 退出 ==========
-  /** 停止演奏 */
+  /** 停止演奏（暂停中也可以直接结束） */
   function onStopBtn() {
-    if (isPlaying) stopAuto();
+    if (isPlaying || isPaused) stopAuto();
   }
   function resetStopBtn() {
     const btn = document.getElementById("stopBtn");
@@ -1803,7 +1905,11 @@
 
   document.getElementById("playBtn").addEventListener("click", () => {
     resetStopBtn();
-    startAuto();
+    if (isPaused) resumeAuto(); else startAuto(); // 暂停中点"开始"视为继续
+  });
+  document.getElementById("pauseBtn").addEventListener("click", () => {
+    if (isPaused) resumeAuto();
+    else if (isPlaying) pauseAuto();
   });
   document.getElementById("stopBtn").addEventListener("click", onStopBtn);
   document.getElementById("songBtn").addEventListener("click", function () { openSongModal(); });
@@ -2225,7 +2331,8 @@
   document.addEventListener("keydown", e => {
     if (e.code === "Space" && e.target.tagName !== "INPUT" && e.target.tagName !== "TEXTAREA") {
       e.preventDefault();
-      if (isPlaying) stopAuto();
+      if (isPaused) resumeAuto();
+      else if (isPlaying) stopAuto();
       else startAuto();
     }
     if (e.code === "Escape") {

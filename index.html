@@ -3,16 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#14100c">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="自动弹奏钢琴">
 <title>自动弹奏钢琴</title>
 <link rel="stylesheet" href="styles.css">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icon-180.png">
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 </head>
 <body>
 
@@ -28,7 +20,6 @@
         <button class="btn stop" id="stopBtn">■ 结束</button>
         <button class="btn song" id="songBtn">选曲</button>
         <button type="button" class="btn ctrl-toggle" id="ctrlToggleBtn" title="控制面板" aria-label="控制面板" aria-expanded="false">控制</button>
-        <button type="button" class="btn share" id="shareBtn" title="分享演奏卡" aria-label="分享演奏卡">分享</button>
       </div>
       <div class="credit-tp">TP 制作</div>
     </div>
@@ -36,22 +27,19 @@
 
   <div class="piano-stage">
     <div class="status" id="status">准备就绪</div>
-    <div class="progress-row" id="progressRow" hidden>
-      <div class="play-progress" id="playProgress" role="slider" tabindex="0" aria-label="播放进度，点击跳转"
-           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="点击跳转播放位置">
-        <div class="play-progress-fill" id="playProgressFill"></div>
-      </div>
-      <span class="progress-text" id="progressText"></span>
-    </div>
     <div class="cat-row">
     <div class="cat-piano-decor" aria-hidden="true">
       <div class="cat-piano-glow">
         <img src="cat-piano.webp" alt="" draggable="false">
       </div>
     </div>
-    <button type="button" class="leaf-side-btn" id="leafToggleBtn" title="点击开启春季特效" aria-label="季节特效开关" aria-pressed="false">
-      特效关
-    </button>
+    <div class="season-slider" id="seasonSlider" role="slider" tabindex="0" title="拖动滑过四季"
+         aria-label="季节特效" aria-valuemin="0" aria-valuemax="4" aria-valuenow="4" aria-valuetext="关">
+      <div class="season-track" id="seasonTrack">
+        <div class="season-thumb" id="seasonThumb"></div>
+      </div>
+      <div class="season-ticks" aria-hidden="true"><span data-i="0">春</span><span data-i="1">夏</span><span data-i="2">秋</span><span data-i="3">冬</span><span data-i="4">关</span></div>
+    </div>
   </div>
     <div class="keyboard-wrap" id="keyboardWrap">
       <div class="keyboard" id="keyboard"></div>
@@ -208,27 +196,27 @@
   function saveLibraryToStorage() {
     try {
       localStorage.setItem(LIB_STORAGE_KEY, JSON.stringify(serializeLibrary(SONG_LIBRARY)));
-      markLibraryDirty();
     } catch (e) {
       console.warn("曲库保存失败", e);
     }
   }
 
-  /** 将原始 JSON 曲目规范为库内结构（兼容 name / nameEn / nameZh） */
-  function stableIdFromName(str) {
-    // 无 id 的曲目用曲名派生稳定 id，避免每次拉取远程曲库都生成随机 id 导致重复堆积
-    let h = 5381;
-    const s = String(str || "");
-    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-    return "name_" + (h >>> 0).toString(36);
+  /** 无 id 曲目：按曲名生成稳定 id，重复拉取/导入时按 id 覆盖，不堆积重复条目 */
+  function stableIdFromName(s) {
+    const base = (s.nameEn || s.name || "") + "|" + (s.nameZh || "");
+    let h = 0;
+    for (let i = 0; i < base.length; i++) { h = (h * 31 + base.charCodeAt(i)) | 0; }
+    return "remote_" + (h >>> 0).toString(36);
   }
+
+  /** 将原始 JSON 曲目规范为库内结构（兼容 name / nameEn / nameZh） */
   function songEntryFromRaw(s) {
     if (!s || !(s.name || s.nameEn)) return null;
     const en = s.nameEn || s.name;
     const zh = s.nameZh || null;
     const showZh = !!s.showZh && !!zh;
     return {
-      id: s.id || stableIdFromName(en),
+      id: s.id || stableIdFromName(s),
       name: showZh ? zh : en,
       nameEn: en,
       nameZh: zh,
@@ -261,10 +249,10 @@
   }
 
   /**
-   * 启动时从 SIDE_CAR_LIBRARY_FILE（远程 JSON）拉取并合并进曲库。
+   * 自动读取远程 auto-piano-library.json 并合并进曲库。
    * - 已有相同 id：用文件中的曲目覆盖本地
    * - 新 id：追加
-   * - 文件不存在或网络失败时静默失败
+   * - file:// 或文件不存在时静默失败
    */
   const SIDE_CAR_LIBRARY_FILE = "https://totp99.github.io/source/piano/auto-piano-library.json";
 
@@ -1202,7 +1190,6 @@
       return;
     }
 
-    try { updatePlayProgress(); } catch (e) {}
     midiRaf = setTimeout(midiScheduleWindow, MIDI_POLL_MS);
   }
 
@@ -1333,7 +1320,6 @@
       nextBeatTime += beatDuration();
       beatCount++;
     }
-    try { updatePlayProgress(); } catch (e) {}
     timerId = setTimeout(scheduler, SCHEDULE_MS);
   }
 
@@ -1347,11 +1333,10 @@
     if (midiEvents && midiEvents.length) {
       await resumeAudio();
       isPlaying = true;
-      (function(){ var r = document.getElementById("progressRow"); if (r) r.hidden = false; })();
       SeasonParticles.notifyPlayStart();
       const btn = document.getElementById("playBtn");
       btn.classList.add("active");
-      btn.textContent = "♪ 演奏中";
+      btn.textContent = "演奏中";
       clearAllHighlights();
       clearPreview();
       setPedal(pedalEnabled);
@@ -1365,11 +1350,10 @@
     }
     await resumeAudio();
     isPlaying = true;
-    (function(){ var r = document.getElementById("progressRow"); if (r) r.hidden = false; })();
     SeasonParticles.notifyPlayStart();
     const btn = document.getElementById("playBtn");
     btn.classList.add("active");
-    btn.textContent = "♪ 演奏中";
+    btn.textContent = "演奏中";
     clearAllHighlights();
     clearPreview();
     nextBeatTime = audioCtx.currentTime + 0.12;
@@ -1382,7 +1366,6 @@
 
   function stopAuto() {
     isPlaying = false;
-    (function(){ var r = document.getElementById("progressRow"); if (r) r.hidden = true; })();
     SeasonParticles.notifyPlayStop();
     if (timerId) { clearTimeout(timerId); timerId = null; }
     clearMidiTimers();
@@ -1537,7 +1520,7 @@
         a.remove();
       }, 200);
     } catch (e) {
-      showToast("导出失败：" + (e && e.message ? e.message : e), { type: "err" });
+      alert("导出失败：" + (e && e.message ? e.message : e));
     }
   }
 
@@ -1565,7 +1548,7 @@
 
   function exportAllLibrary() {
     if (!SONG_LIBRARY.length) {
-      showToast("曲库为空，无可导出内容", { type: "err" });
+      alert("曲库为空，无可导出内容");
       return;
     }
     downloadJson("auto-piano-library.json", {
@@ -1573,7 +1556,6 @@
       exportedAt: new Date().toISOString(),
       songs: serializeLibrary(SONG_LIBRARY)
     });
-    markBackupDone();
   }
 
   function importLibraryFromJson(obj) {
@@ -1669,7 +1651,7 @@
           if (!song.nameZh) {
             const hit = lookupSongZh(song.nameEn || song.name);
             if (!hit) {
-              showToast("无常用中文译名，可手动改名");
+              alert("无常用中文译名，可手动改名");
               return;
             }
             song.nameZh = hit;
@@ -1709,39 +1691,22 @@
       del.title = "从曲库删除";
       del.addEventListener("click", function (e) {
         e.stopPropagation();
-        const songName = song.nameEn || song.name;
-        showConfirm("确定从曲库删除《" + songName + "》？", "删除").then(function (ok) {
-          if (!ok) return;
-          const idx = SONG_LIBRARY.findIndex(function (s) { return s.id === song.id; });
-          if (idx < 0) return;
-          const removed = SONG_LIBRARY.splice(idx, 1)[0];
-          const removedIdx = idx;
-          saveLibraryToStorage();
-          if (currentSong.id === song.id) {
-            if (SONG_LIBRARY.length) loadSong(SONG_LIBRARY[0]);
-            else {
-              currentSong = { id: "empty", name: "（空）", desc: "", tempo: 92, melody: [], chords: {}, chordOrder: [] };
-              melody = []; chords = {}; chordOrder = []; midiEvents = null;
-              document.getElementById("status").textContent = "曲库已空 — 请导入或自定义";
-            }
+        if (!confirm("确定从曲库删除《" + (song.nameEn || song.name) + "》？")) return;
+        const idx = SONG_LIBRARY.findIndex(function (s) { return s.id === song.id; });
+        if (idx < 0) return;
+        SONG_LIBRARY.splice(idx, 1);
+        saveLibraryToStorage();
+        if (currentSong.id === song.id) {
+          if (SONG_LIBRARY.length) loadSong(SONG_LIBRARY[0]);
+          else {
+            currentSong = { id: "empty", name: "（空）", desc: "", tempo: 92, melody: [], chords: {}, chordOrder: [] };
+            melody = []; chords = {}; chordOrder = []; midiEvents = null;
+            document.getElementById("status").textContent = "曲库已空 — 请导入或自定义";
           }
-          renderSongList();
-          renderMiniSongList();
-          updateNowPlaying();
-          showToast("已删除《" + songName + "》", {
-            action: {
-              label: "撤销",
-              onClick: function () {
-                SONG_LIBRARY.splice(Math.min(removedIdx, SONG_LIBRARY.length), 0, removed);
-                saveLibraryToStorage();
-                renderSongList();
-                renderMiniSongList();
-                updateNowPlaying();
-                showToast("已恢复《" + songName + "》", { type: "ok" });
-              }
-            }
-          });
-        });
+        }
+        renderSongList();
+        renderMiniSongList();
+        updateNowPlaying();
       });
 
       actions.appendChild(zhBtn);
@@ -1816,9 +1781,9 @@
         const n = importLibraryFromJson(obj);
         setModalMainTab("library");
         document.getElementById("status").textContent = "已导入 " + n + " 首曲目到曲库";
-        showToast("成功导入 " + n + " 首曲目", { type: "ok" });
+        alert("成功导入 " + n + " 首曲目");
       } catch (err) {
-        showToast("导入失败：" + (err && err.message ? err.message : err), { type: "err", duration: 5000 });
+        alert("导入失败：" + (err && err.message ? err.message : err));
       }
       e.target.value = "";
     };
@@ -1833,7 +1798,7 @@
     const name = (document.getElementById("customName").value || "自定义").trim();
     const notes = parseCustomNotes(document.getElementById("customNotes").value);
     if (notes.length < 2) {
-      showToast("请至少输入 2 个有效音符，例如：C4 D4 E4 F4 G4", { type: "err" });
+      alert("请至少输入 2 个有效音符，例如：C4 D4 E4 F4 G4");
       return;
     }
     const root = guessMajorRoot(notes);
@@ -2293,9 +2258,9 @@
         });
 
         if (!ok.length) {
-          showToast("MIDI 解析失败：" + failed.map(function (f) {
+          alert("MIDI 解析失败：" + failed.map(function (f) {
             return f.file.name + "（" + (f.error && f.error.message ? f.error.message : f.error) + "）";
-          }).join("；"), { type: "err", duration: 6000 });
+          }).join("；"));
           e.target.value = "";
           return;
         }
@@ -2376,12 +2341,12 @@
   if (addMidiBtn) {
     addMidiBtn.addEventListener("click", function () {
       if (!currentSong || !currentSong.midiEvents || !currentSong.midiEvents.length) {
-        showToast("请先导入 MIDI 文件", { type: "err" });
+        alert("请先导入 MIDI 文件");
         return;
       }
       // 避免重复 id
       if (SONG_LIBRARY.some(function (s) { return s.id === currentSong.id; })) {
-        showToast("该曲已在曲库中");
+        alert("该曲已在曲库中");
         addMidiBtn.disabled = true;
         return;
       }
@@ -3002,368 +2967,88 @@ const SONG_NAME_ZH_MAP = {
     };
   })();
 
-  // ========== 季节特效开关按钮（UI，不改核心演奏逻辑）==========
-  // 循环顺序：春季 → 夏季 → 秋季 → 冬季 → 关（默认状态，只弹钢琴）
+  // ========== 四季流转滑杆（UI，不改核心演奏逻辑）==========
+  // 顺序：春 → 夏 → 秋 → 冬 → 关 →（循环）春，默认关闭，只弹钢琴
   const SEASON_CYCLE = [
-    { key: "spring", label: "春季", title: "点击切换为夏季" },
-    { key: "summer", label: "夏季", title: "点击切换为秋季" },
-    { key: "autumn", label: "秋季", title: "点击切换为冬季" },
-    { key: "winter", label: "冬季", title: "点击关闭特效，只弹钢琴" },
-    { key: null, label: "特效关", title: "点击开启春季特效" }
+    { key: "spring" }, { key: "summer" }, { key: "autumn" }, { key: "winter" }, { key: null }
   ];
+  const SEASON_NAMES = ["春", "夏", "秋", "冬", "关"];
   let seasonIndex = 0;
-  function setSeasonByIndex(idx) {
-    seasonIndex = ((idx % SEASON_CYCLE.length) + SEASON_CYCLE.length) % SEASON_CYCLE.length;
+  function paintSeasonThumb(v) {
+    var slider = document.getElementById("seasonSlider");
+    if (slider) slider.style.setProperty("--pos", v);
+  }
+  function applySeasonState(idx) {
+    seasonIndex = idx;
     const cur = SEASON_CYCLE[seasonIndex];
-    var btn = document.getElementById("leafToggleBtn");
-    if (btn) {
-      btn.setAttribute("aria-pressed", cur.key ? "true" : "false");
-      btn.title = cur.title;
-      btn.textContent = cur.label;
+    var slider = document.getElementById("seasonSlider");
+    if (slider) {
+      slider.setAttribute("aria-valuenow", seasonIndex);
+      slider.setAttribute("aria-valuetext", SEASON_NAMES[seasonIndex]);
+      var ticks = slider.querySelectorAll(".season-ticks span");
+      for (var i = 0; i < ticks.length; i++) {
+        ticks[i].classList.toggle("on", +ticks[i].getAttribute("data-i") === seasonIndex);
+      }
     }
     // 目前只有秋叶主题带四角装饰图；其余主题不启用该装饰，避免为每个主题都画一套角标图。
     document.documentElement.classList.toggle("leaves-on", cur.key === "autumn");
     SeasonParticles.setTheme(cur.key);
   }
-  (function setupSeasonDecor() {
+  function setSeasonByIndex(idx) {
+    idx = ((idx % SEASON_CYCLE.length) + SEASON_CYCLE.length) % SEASON_CYCLE.length;
+    applySeasonState(idx);
+    paintSeasonThumb(idx);
+  }
+  (function setupSeasonSlider() {
+    var slider = document.getElementById("seasonSlider");
+    var track = document.getElementById("seasonTrack");
+    if (!slider || !track) { setSeasonByIndex(SEASON_CYCLE.length - 1); return; }
+    function stepPx() { return track.clientWidth / 4 || 40; }
+    function xToV(clientX) {
+      var r = track.getBoundingClientRect();
+      return (clientX - r.left) / Math.max(1, r.width) * 4;
+    }
+    function wrapV(v) { while (v > 4.5) v -= 5; while (v < -0.5) v += 5; return v; }
+    function normIdx(v) { return ((Math.round(v) % 5) + 5) % 5; }
+    var dragV = null, lastX = null;
+    slider.addEventListener("pointerdown", function (e) {
+      try { slider.setPointerCapture(e.pointerId); } catch (err) {}
+      slider.classList.add("dragging");
+      lastX = e.clientX;
+      dragV = wrapV(xToV(e.clientX));
+      paintSeasonThumb(dragV);
+      var idx = normIdx(dragV);
+      if (idx !== seasonIndex) applySeasonState(idx);
+    });
+    slider.addEventListener("pointermove", function (e) {
+      if (dragV === null || lastX === null) return;
+      var dx = e.clientX - lastX;
+      lastX = e.clientX;
+      dragV = wrapV(dragV + dx / stepPx());
+      paintSeasonThumb(dragV);
+      var idx = normIdx(dragV);
+      if (idx !== seasonIndex) applySeasonState(idx);
+    });
+    function endDrag() {
+      if (dragV === null) return;
+      slider.classList.remove("dragging");
+      var idx = normIdx(dragV);
+      dragV = null; lastX = null;
+      setSeasonByIndex(idx); // 松手吸附到最近的季节
+    }
+    slider.addEventListener("pointerup", endDrag);
+    slider.addEventListener("pointercancel", endDrag);
+    slider.addEventListener("keydown", function (e) {
+      var d = 0;
+      if (e.key === "ArrowRight" || e.key === "ArrowUp") d = 1;
+      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") d = -1;
+      else if (e.key === "Home") { setSeasonByIndex(0); e.preventDefault(); return; }
+      else if (e.key === "End") { setSeasonByIndex(4); e.preventDefault(); return; }
+      else return;
+      e.preventDefault();
+      setSeasonByIndex(seasonIndex + d);
+    });
     setSeasonByIndex(SEASON_CYCLE.length - 1); // 默认关闭特效（只弹钢琴）
-    var leafBtn = document.getElementById("leafToggleBtn");
-    if (leafBtn) {
-      leafBtn.addEventListener("click", function (e) {
-        e.preventDefault();
-        setSeasonByIndex(seasonIndex + 1);
-      });
-    }
-  })();
-
-
-  // ========== 12. 商业化组件（Toast / 确认框 / 播放进度 / 启动屏 / 分享卡 / 备份提醒）==========
-
-  /** 应用内 Toast：替代阻塞式 alert */
-  function showToast(msg, opts) {
-    opts = opts || {};
-    const wrap = document.getElementById("toastWrap");
-    if (!wrap) { try { alert(msg); } catch (e) {} return function () {}; }
-    const el = document.createElement("div");
-    el.className = "toast" + (opts.type ? " " + opts.type : "");
-    const dot = document.createElement("span");
-    dot.className = "toast-dot";
-    const m = document.createElement("span");
-    m.className = "toast-msg";
-    m.textContent = String(msg);
-    el.appendChild(dot);
-    el.appendChild(m);
-    let timer = null;
-    function dismiss() {
-      if (timer) { clearTimeout(timer); timer = null; }
-      el.classList.remove("show");
-      setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 260);
-    }
-    if (opts.action && opts.action.label) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "toast-action";
-      b.textContent = opts.action.label;
-      b.addEventListener("click", function () {
-        try { opts.action.onClick(); } catch (e) {}
-        dismiss();
-      });
-      el.appendChild(b);
-    }
-    // 同时只保留 3 条，避免刷屏
-    while (wrap.children.length >= 3) wrap.removeChild(wrap.firstChild);
-    wrap.appendChild(el);
-    requestAnimationFrame(function () { el.classList.add("show"); });
-    timer = setTimeout(dismiss, opts.duration || 3200);
-    return dismiss;
-  }
-
-  /** 应用内确认框：替代 confirm，返回 Promise<boolean> */
-  let confirmResolve = null;
-  function showConfirm(text, okLabel) {
-    return new Promise(function (resolve) {
-      const mask = document.getElementById("confirmMask");
-      const txt = document.getElementById("confirmText");
-      const okBtn = document.getElementById("confirmOk");
-      if (!mask || !txt) { resolve(false); return; }
-      if (confirmResolve) { try { confirmResolve(false); } catch (e) {} }
-      confirmResolve = resolve;
-      txt.textContent = text;
-      if (okBtn && okLabel) okBtn.textContent = okLabel;
-      mask.hidden = false;
-    });
-  }
-  (function setupConfirmBox() {
-    const mask = document.getElementById("confirmMask");
-    const okBtn = document.getElementById("confirmOk");
-    const cancelBtn = document.getElementById("confirmCancel");
-    if (!mask) return;
-    function done(v) {
-      mask.hidden = true;
-      if (confirmResolve) { const r = confirmResolve; confirmResolve = null; r(v); }
-    }
-    if (okBtn) okBtn.addEventListener("click", function () { done(true); });
-    if (cancelBtn) cancelBtn.addEventListener("click", function () { done(false); });
-    mask.addEventListener("click", function (e) { if (e.target === mask) done(false); });
-    document.addEventListener("keydown", function (e) {
-      if (e.code === "Escape" && !mask.hidden) done(false);
-    });
-  })();
-
-  // ---------- 播放进度：进度条 + 小节显示 + 点击/键盘跳转 ----------
-  function midiTotalBeats() {
-    if (!midiEvents || !midiEvents.length) return 0;
-    const last = midiEvents[midiEvents.length - 1];
-    return last ? (last.beat + (last.durBeats || 0)) : 0;
-  }
-  function updatePlayProgress() {
-    const row = document.getElementById("progressRow");
-    const fill = document.getElementById("playProgressFill");
-    const bar = document.getElementById("playProgress");
-    const text = document.getElementById("progressText");
-    if (!row || !fill || !bar || !text) return;
-    if (!isPlaying) { row.hidden = true; return; }
-    let cur = 0, total = 0;
-    if (midiPlaying && midiEvents && midiEvents.length) {
-      total = midiTotalBeats();
-      cur = Math.max(0, Math.min(total, midiNowBeat()));
-    } else if (melody.length) {
-      total = melody.length;
-      cur = Math.max(0, Math.min(total, melodyIndex));
-    } else { row.hidden = true; return; }
-    row.hidden = false;
-    const pct = total > 0 ? (cur / total * 100) : 0;
-    fill.style.width = pct + "%";
-    bar.style.setProperty("--pp", pct + "%");
-    bar.setAttribute("aria-valuenow", String(Math.round(pct)));
-    const curBar = Math.floor(cur / 4) + 1;
-    const totalBars = Math.max(1, Math.ceil(total / 4));
-    text.textContent = "第" + curBar + "小节 / 共" + totalBars + "小节";
-  }
-  /** MIDI 跳转到指定拍（照着 midiRescheduleFromNow 的安全模式重排） */
-  function midiSeekToBeat(target) {
-    if (!midiPlaying || !midiEvents || !midiEvents.length || !audioCtx) return;
-    const total = midiTotalBeats();
-    target = Math.max(0, Math.min(Math.max(0, total - 0.05), target));
-    midiTimerIds.forEach(function (id) { clearTimeout(id); });
-    midiTimerIds = [];
-    if (midiEndTimer) { clearTimeout(midiEndTimer); midiEndTimer = null; }
-    if (midiRaf) { clearTimeout(midiRaf); midiRaf = null; }
-    midiBeatOffset = target;
-    midiAbsStart = audioCtx.currentTime + 0.06;
-    let i = 0;
-    while (i < midiEvents.length && midiEvents[i].beat < target - 0.01) i++;
-    midiNextIndex = i;
-    clearAllHighlights();
-    clearPreview();
-    midiScheduleWindow();
-  }
-  /** 简谱跳转到指定拍（每拍对应一个 melody 条目） */
-  function jianpuSeekToBeat(target) {
-    if (!isPlaying || midiPlaying || !melody.length || !audioCtx) return;
-    if (timerId) { clearTimeout(timerId); timerId = null; }
-    const idx = Math.max(0, Math.min(melody.length - 1, Math.floor(target)));
-    melodyIndex = idx;
-    beatCount = idx;
-    chordIndex = Math.floor(idx / 4);
-    clearAllHighlights();
-    clearPreview();
-    nextBeatTime = audioCtx.currentTime + 0.08;
-    scheduler();
-  }
-  (function setupProgressSeek() {
-    const bar = document.getElementById("playProgress");
-    if (!bar) return;
-    function seekByClientX(clientX) {
-      if (!isPlaying) return;
-      const r = bar.getBoundingClientRect();
-      if (r.width <= 0) return;
-      const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-      if (midiPlaying && midiEvents && midiEvents.length) midiSeekToBeat(frac * midiTotalBeats());
-      else if (melody.length) jianpuSeekToBeat(frac * melody.length);
-    }
-    bar.addEventListener("click", function (e) { seekByClientX(e.clientX); });
-    bar.addEventListener("keydown", function (e) {
-      if (!isPlaying) return;
-      const step = 4; // 左右键 = 前后一小节
-      if (e.code === "ArrowRight") {
-        e.preventDefault();
-        if (midiPlaying) midiSeekToBeat(midiNowBeat() + step);
-        else jianpuSeekToBeat(melodyIndex + step);
-      } else if (e.code === "ArrowLeft") {
-        e.preventDefault();
-        if (midiPlaying) midiSeekToBeat(midiNowBeat() - step);
-        else jianpuSeekToBeat(melodyIndex - step);
-      }
-    });
-  })();
-
-  // ---------- 启动屏 ----------
-  (function setupSplash() {
-    const sp = document.getElementById("splash");
-    if (!sp) return;
-    let done = false;
-    function hide() {
-      if (done) return;
-      done = true;
-      sp.classList.add("hide");
-      setTimeout(function () { if (sp.parentNode) sp.parentNode.removeChild(sp); }, 600);
-    }
-    const t0 = Date.now();
-    window.addEventListener("load", function () {
-      setTimeout(hide, Math.max(0, 700 - (Date.now() - t0)));
-    });
-    setTimeout(hide, 3000); // 保险：load 迟迟不来也不卡住
-  })();
-
-  // ---------- 演奏分享卡 ----------
-  function loadImageForShare(src) {
-    return new Promise(function (resolve, reject) {
-      const img = new Image();
-      img.onload = function () { resolve(img); };
-      img.onerror = reject;
-      img.src = src;
-    });
-  }
-  function drawCoverImage(ctx, img, x, y, w, h, radius) {
-    ctx.save();
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x, y, w, h, radius);
-    else ctx.rect(x, y, w, h);
-    ctx.clip();
-    const ir = img.width / img.height;
-    const r = w / h;
-    let dw, dh;
-    if (ir > r) { dh = h; dw = h * ir; } else { dw = w; dh = w / ir; }
-    ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
-    ctx.restore();
-  }
-  function wrapShareText(ctx, text, cx, y, maxW, lineH) {
-    const chars = String(text).split("");
-    let line = "", yy = y;
-    chars.forEach(function (ch) {
-      const t = line + ch;
-      if (ctx.measureText(t).width > maxW && line) {
-        ctx.fillText(line, cx, yy);
-        line = ch;
-        yy += lineH;
-      } else line = t;
-    });
-    if (line) ctx.fillText(line, cx, yy);
-    return yy;
-  }
-  function drawMiniKeys(ctx, x, y, w, h) {
-    const whites = 14;
-    const ww = w / whites;
-    ctx.fillStyle = "#f7f1e6";
-    for (let i = 0; i < whites; i++) ctx.fillRect(x + i * ww + 1, y, ww - 2, h);
-    ctx.fillStyle = "#14100c";
-    const blackAfter = [0, 1, 3, 4, 5];
-    for (let i = 0; i < whites; i++) {
-      if (blackAfter.indexOf(i % 7) < 0) continue;
-      ctx.fillRect(x + (i + 1) * ww - ww * 0.3, y, ww * 0.6, h * 0.62);
-    }
-  }
-  async function sharePerformance() {
-    showToast("正在生成演奏卡…");
-    try {
-      const W = 1080, H = 1350;
-      const cv = document.createElement("canvas");
-      cv.width = W; cv.height = H;
-      const ctx = cv.getContext("2d");
-      const g = ctx.createLinearGradient(0, 0, 0, H);
-      g.addColorStop(0, "#251710");
-      g.addColorStop(1, "#0e0906");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, W, H);
-      ctx.strokeStyle = "#d4923a";
-      ctx.lineWidth = 6;
-      ctx.strokeRect(36, 36, W - 72, H - 72);
-      ctx.strokeStyle = "rgba(212,146,58,0.35)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(56, 56, W - 112, H - 112);
-      try {
-        const img = await loadImageForShare("cat-piano.webp");
-        drawCoverImage(ctx, img, 100, 110, W - 200, 540, 28);
-      } catch (e) {}
-      ctx.textAlign = "center";
-      ctx.textBaseline = "alphabetic";
-      ctx.fillStyle = "#efc06a";
-      ctx.font = "700 84px 'Noto Serif SC', serif";
-      ctx.fillText("自动弹奏钢琴", W / 2, 800);
-      ctx.fillStyle = "#f4e8d8";
-      ctx.font = "500 50px 'PingFang SC', 'Microsoft YaHei', sans-serif";
-      const songName = (currentSong && currentSong.name) ? currentSong.name : "随心弹奏";
-      const endY = wrapShareText(ctx, "正在演奏《" + songName + "》", W / 2, 890, W - 220, 66);
-      ctx.fillStyle = "#a89078";
-      ctx.font = "400 38px sans-serif";
-      const d = new Date();
-      ctx.fillText("88 键 · 自动演奏 · TP 制作", W / 2, endY + 70);
-      ctx.fillText(d.getFullYear() + " 年 " + (d.getMonth() + 1) + " 月 " + d.getDate() + " 日", W / 2, endY + 122);
-      drawMiniKeys(ctx, 100, H - 220, W - 200, 110);
-      const blob = await new Promise(function (res) { cv.toBlob(res, "image/png"); });
-      if (!blob) throw new Error("图片生成失败");
-      const file = new File([blob], "piano-share.png", { type: "image/png" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({ files: [file], title: "自动弹奏钢琴" });
-          return;
-        } catch (e) {
-          if (e && e.name === "AbortError") return; // 用户取消分享，不再降级下载
-        }
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "piano-share.png";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
-      showToast("演奏卡已保存，可去相册分享", { type: "ok" });
-    } catch (e) {
-      showToast("分享卡生成失败，请重试", { type: "err" });
-    }
-  }
-  (function setupShareBtn() {
-    const btn = document.getElementById("shareBtn");
-    if (btn) btn.addEventListener("click", function () { sharePerformance(); });
-  })();
-
-  // ---------- 曲库备份提醒 ----------
-  const BACKUP_TS_KEY = "autoPiano.lastBackupTs";
-  const LIBDIRTY_TS_KEY = "autoPiano.libDirtyTs";
-  const BACKUP_NAG_MS = 7 * 24 * 3600 * 1000;
-  function markLibraryDirty() {
-    try { localStorage.setItem(LIBDIRTY_TS_KEY, String(Date.now())); } catch (e) {}
-  }
-  function markBackupDone() {
-    try { localStorage.setItem(BACKUP_TS_KEY, String(Date.now())); } catch (e) {}
-  }
-  (function setupBackupNag() {
-    try {
-      if (!SONG_LIBRARY.length) return;
-      const now = Date.now();
-      const dirty = parseInt(localStorage.getItem(LIBDIRTY_TS_KEY) || "0", 10) || 0;
-      if (!dirty) return;
-      let lastBk = parseInt(localStorage.getItem(BACKUP_TS_KEY) || "0", 10) || 0;
-      if (!lastBk) {
-        // 从未备份过：以首次变更为起点开始算 7 天宽限，不在首次启动就打扰
-        localStorage.setItem(BACKUP_TS_KEY, String(dirty));
-        return;
-      }
-      if (dirty > lastBk && now - lastBk > BACKUP_NAG_MS) {
-        setTimeout(function () {
-          showToast("曲库有更新且超过 7 天未备份，换机/清缓存会丢失", {
-            duration: 9000,
-            action: {
-              label: "立即导出",
-              onClick: function () { exportAllLibrary(); }
-            }
-          });
-        }, 2500);
-      }
-    } catch (e) {}
   })();
 
   // ========== 横竖屏自动检测 ==========
@@ -3412,27 +3097,5 @@ const SONG_NAME_ZH_MAP = {
 
 })();
 </script>
-
-<!-- 应用内通知 -->
-<div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
-
-<!-- 应用内确认框 -->
-<div class="confirm-mask" id="confirmMask" hidden>
-  <div class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmText">
-    <p id="confirmText"></p>
-    <div class="confirm-btns">
-      <button type="button" class="btn" id="confirmCancel">取消</button>
-      <button type="button" class="btn danger" id="confirmOk">删除</button>
-    </div>
-  </div>
-</div>
-
-<!-- 启动屏 -->
-<div class="splash" id="splash" aria-hidden="true">
-  <img class="splash-cat" src="cat-piano.webp" alt="">
-  <div class="splash-title">自动弹奏钢琴</div>
-  <div class="splash-sub">TP 制作</div>
-</div>
-
 </body>
 </html>

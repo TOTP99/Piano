@@ -780,3 +780,59 @@ body {
     color: #ffd98a;
     opacity: 1;
   }
+
+/* ===== UI 升级 v4（2026-10-09）：顶栏主次分级 + 控制面板对齐 + 选曲弹窗统一 ===== */
+/* 只改样式，不动 JS；琴键样式零改动 */
+
+/* —— 顶栏：开始做主按钮 —— */
+.top-actions{ gap:8px !important; }
+.top-actions .btn{ height:44px; border-radius:8px; font-size:14px !important; }
+#playBtn{
+  flex:1.6 !important; font-weight:700; letter-spacing:4px;
+  background:linear-gradient(180deg, var(--brass-bright), var(--brass)) !important;
+  border-color:var(--brass-bright) !important; color:#241304 !important;
+  box-shadow:0 3px 12px rgba(212,146,58,.35), inset 0 1px 0 rgba(255,255,255,.45) !important;
+}
+#pauseBtn, #stopBtn, #songBtn{ flex:1 !important; }
+#ctrlToggleBtn{ flex:1 !important; }
+
+/* —— 控制面板：滑块行对齐 —— */
+.ctrl-section{ border-top:1px solid var(--hairline); padding:8px 0; }
+.ctrl-section:first-of-type{ border-top:none; }
+.ctrl-section-title{ letter-spacing:2px; }
+.panel.sliders label{
+  display:flex; align-items:center; gap:10px; height:32px; margin:0;
+}
+.panel.sliders .lab{ width:38px; flex:0 0 38px; text-align:left; }
+.panel.sliders input[type=range]{ flex:1; }
+.panel.sliders .val{
+  width:36px; flex:0 0 36px; text-align:right;
+  font-variant-numeric:tabular-nums; color:var(--brass-bright);
+}
+.panel.toggles{ gap:4px 16px; }
+.panel.toggles .chk{ height:30px; }
+
+/* —— 选曲弹窗：统一样式 —— */
+.modal-card{ border-radius:16px; }
+.modal-tabs .tab, .add-subtabs .subtab{ border-radius:8px; height:38px; }
+.modal-tabs .tab.active, .add-subtabs .subtab.active{
+  background:rgba(212,146,58,.16); border-color:var(--brass); color:var(--brass-bright);
+}
+.song-item{
+  min-height:44px; display:flex; align-items:center;
+  border-bottom:1px solid var(--hairline);
+}
+.song-item.selected{ border-left:3px solid var(--brass); background:rgba(212,146,58,.08); }
+.zh-song{
+  flex:0 0 30px; height:30px; border-radius:6px; font-size:11px;
+  border:1px solid var(--hairline); background:transparent; color:var(--muted);
+}
+.zh-song.active{
+  border-color:var(--brass); color:var(--brass-bright); background:rgba(212,146,58,.12);
+}
+.custom-box input[type=text], .custom-box textarea{
+  border-radius:8px;
+}
+.custom-box input[type=text]:focus, .custom-box textarea:focus{
+  outline:none; border-color:var(--brass);
+}

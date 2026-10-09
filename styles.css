@@ -864,3 +864,13 @@ body {
 .song-item{ min-height:40px; font-size:12px; }
 .custom-box input[type=text], .custom-box textarea{ font-size:12px; padding:8px 10px; }
 .btn.sm{ height:38px; font-size:12px; }
+
+/* ===== v4.2（2026-10-09）：顶栏恢复五键等宽（用户要求） ===== */
+#playBtn{
+  flex:1 !important; min-width:62px;
+  font-weight:400; font-size:12px !important; letter-spacing:0; text-indent:0;
+  background:rgba(255,255,255,.04) !important;
+  border:1px solid var(--hairline-strong) !important; color:var(--text) !important;
+  box-shadow:0 2px 6px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06) !important;
+  position:static;
+}

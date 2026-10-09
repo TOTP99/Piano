@@ -836,3 +836,31 @@ body {
 .custom-box input[type=text]:focus, .custom-box textarea:focus{
   outline:none; border-color:var(--brass);
 }
+
+/* ===== UI 升级 v4.1（2026-10-09）：顶栏字体小两号 + 页面整体缩小 + 主按钮固定可滑 ===== */
+.top-actions{ overflow-x:auto; scrollbar-width:none; }
+.top-actions::-webkit-scrollbar{ display:none; }
+.top-actions .btn{ font-size:12px !important; height:42px; flex-shrink:0; }
+#playBtn{
+  font-size:13px !important;
+  position:sticky; left:0; z-index:2; /* 主按钮固定 */
+  flex:1.6 !important; min-width:96px;
+}
+#pauseBtn, #stopBtn, #songBtn, #ctrlToggleBtn{ flex:1 !important; min-width:62px; }
+
+/* 控制面板整体小一号 */
+.ctrl-card{ padding:2px 14px 8px; }
+.ctrl-card h3{ font-size:12px; padding:8px 0 2px; }
+.ctrl-section-title{ font-size:10px; margin-bottom:4px; }
+.srow{ height:30px; }
+.srow .lab, .srow .val{ font-size:12px; }
+.panel.toggles .chk{ font-size:12px; height:28px; }
+
+/* 选曲弹窗整体小一号 */
+.modal-card{ padding:14px; }
+.modal-card h2{ font-size:14px; }
+.modal-card .hint, .hint-inline{ font-size:10px; }
+.modal-tabs .tab, .add-subtabs .subtab{ height:34px; font-size:12px; }
+.song-item{ min-height:40px; font-size:12px; }
+.custom-box input[type=text], .custom-box textarea{ font-size:12px; padding:8px 10px; }
+.btn.sm{ height:38px; font-size:12px; }

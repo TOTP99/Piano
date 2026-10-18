@@ -3165,7 +3165,19 @@ const SONG_NAME_ZH_MAP = {
     applyOrientationMode();
   })();
 
+  /* 供外部音频状态点调用（纯 UI，不碰引擎） */
+  window.PianoAudio = {
+    ensure: ensureAudio,
+    isUnlocked: function () { return !!audioCtx && audioCtx.state === "running"; },
+    forceUnlock: function () {
+      ensureAudio();
+      if (audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume().catch(function () {});
+      }
+    }
+  };
 })();
 </script>
+<script src="piano-dot.js"></script>
 </body>
 </html>
